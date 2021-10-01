@@ -3,7 +3,7 @@ const express = require("express");
 const Datastore = require("nedb");
 
 const app = express();
-app.use(express.static("public"));
+app.use(express.static("public", { fallthrough: true }));
 app.use(express.json({ limit: "1mb" }));
 
 const database = new Datastore("data.db");
@@ -35,13 +35,12 @@ app.get("/api/search", (req, res) => {
 	});
 });
 
-app.post("/api", (req, res) => {
-	let newData = req.body;
+function isValid(data) {
 	let valid = true;
-	if (Object.keys(newData).length == 0) {
+	if (Object.keys(data).length == 0) {
 		valid = false;
 	} else {
-		for (const key in newData) {
+		for (const key in data) {
 			let keyValid = false;
 			for (const prop in sampleData) {
 				if (key == prop) {
@@ -55,7 +54,13 @@ app.post("/api", (req, res) => {
 			}
 		}
 	}
-	if (valid) {
+	return valid;
+}
+
+app.post("/api", (req, res) => {
+	let newData = req.body;
+
+	if (isValid(newData)) {
 		database.insert(newData, (err, newDoc) => {
 			res.status(201);
 			res.json(newDoc);
@@ -64,6 +69,51 @@ app.post("/api", (req, res) => {
 		res.status(400);
 		res.json({ error: "invalid data" });
 	}
+});
+
+app.put("/api/:id", (req, res) => {
+	let newData = req.body;
+	if (isValid(newData)) {
+		database.find({ _id: req.params.id }, (err, docs) => {
+			if (docs.length == 0) {
+				newData._id = req.params.id;
+				console.log(newData);
+			}
+		});
+		database.update(
+			{ _id: req.params.id },
+			newData,
+			{ upsert: true, returnUpdatedDocs: true },
+			(err, num, affectedDocs, upsert) => {
+				if (upsert) {
+					res.status(201);
+				} else {
+					res.status(200);
+				}
+				res.json(affectedDocs);
+			}
+		);
+	} else {
+		res.status(400);
+		res.json({ error: "invalid data" });
+	}
+});
+
+app.delete("/api/:id", (req, res) => {
+	database.remove({ _id: req.params.id }, {}, (err, numRemoved) => {
+		if (numRemoved > 0) {
+			res.status(204);
+			res.send();
+		} else {
+			res.status(404);
+			res.json({ error: "no matching record to delete" });
+		}
+	});
+});
+
+app.use((req, res) => {
+	res.status(404);
+	res.sendFile(__dirname + "/public/404.html");
 });
 
 module.exports = app;
